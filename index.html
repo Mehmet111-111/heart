@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Heart</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #000; display: flex; align-items: center; justify-content: center; min-height: 100vh; overflow: hidden; }
+canvas { display: block; max-width: 100vw; max-height: 100vh; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const c = document.getElementById('c');
+const ctx = c.getContext('2d');
+let W, H, CX, CY;
+
+function resize() {
+  W = c.width = window.innerWidth;
+  H = c.height = window.innerHeight;
+  CX = W/2; CY = H/2 + 10;
+  const s = Math.min(W, H) / 500;
+  particles.forEach(p => {
+    const angle = p.origAngle;
+    p.homeX = CX + heartX(angle)*9*s;
+    p.homeY = CY + heartY(angle)*9*s;
+    const spiralAngle = angle + Math.PI*0.8 + p.spiralOff;
+    const d = p.scatterDist * s;
+    p.scatterX = p.homeX + Math.cos(spiralAngle)*d;
+    p.scatterY = p.homeY + Math.sin(spiralAngle)*d;
+  });
+  shimmer.forEach(sh => { sh.x = sh.rx*W; sh.y = sh.ry*H; });
+}
+
+function heartX(a) { return 16 * Math.pow(Math.sin(a), 3); }
+function heartY(a) { return -(13*Math.cos(a) - 5*Math.cos(2*a) - 2*Math.cos(3*a) - Math.cos(4*a)); }
+function hsl(h,s,l,a) { return `hsla(${h},${s}%,${l}%,${a})`; }
+function ease(t) { return t<0.5 ? 4*t*t*t : 1-Math.pow(-2*t+2,3)/2; }
+function lerp(a,b,t) { return a+(b-a)*t; }
+function dst(x1,y1,x2,y2) { return Math.sqrt((x2-x1)**2+(y2-y1)**2); }
+
+const TOTAL = 380;
+const HOLD = 130, SCATTER = 160, FLOAT = 100, GATHER = 160;
+const FULL = HOLD + SCATTER + FLOAT + GATHER;
+
+const particles = [];
+for (let i = 0; i < TOTAL; i++) {
+  const angle = (i/TOTAL)*Math.PI*2;
+  const spiralOff = (Math.random()-0.5)*0.6;
+  const scatterDist = 100 + Math.random()*150;
+  const hx = 340 + heartX(angle)*9;
+  const hy = 260 + heartY(angle)*9;
+  const distFromCenter = dst(hx, hy, 340, 260);
+  particles.push({
+    origAngle: angle, spiralOff, scatterDist,
+    homeX: hx, homeY: hy, scatterX: hx, scatterY: hy,
+    x: hx, y: hy,
+    size: 1.5 + Math.random()*2,
+    hue: 335 + Math.random()*35,
+    sat: 65 + Math.random()*25,
+    light: 55 + Math.random()*20,
+    phase: Math.random()*Math.PI*2,
+    wobble: 0.3 + Math.random()*0.6,
+    delay: distFromCenter / 200,
+    angle: angle
+  });
+}
+
+const shimmer = [];
+for (let i = 0; i < 35; i++) {
+  shimmer.push({
+    rx: Math.random(), ry: Math.random(),
+    x: 0, y: 0,
+    size: 0.3 + Math.random()*1,
+    speed: 0.2 + Math.random()*0.6,
+    phase: Math.random()*Math.PI*2
+  });
+}
+
+let frame = 0, prevState = 'heart';
+const pulseRings = [];
+
+function getPhase(f) {
+  const cy = f % FULL;
+  if (cy < HOLD) return { state:'heart', progress: cy/HOLD };
+  if (cy < HOLD+SCATTER) return { state:'scatter', progress: (cy-HOLD)/SCATTER };
+  if (cy < HOLD+SCATTER+FLOAT) return { state:'floating', progress: (cy-HOLD-SCATTER)/FLOAT };
+  return { state:'gather', progress: (cy-HOLD-SCATTER-FLOAT)/GATHER };
+}
+
+function getScale() { return Math.min(W, H) / 500; }
+
+function drawShimmer() {
+  for (const s of shimmer) {
+    const f = 0.08 + (Math.sin(frame*0.008*s.speed+s.phase)*0.5+0.5)*0.35;
+    ctx.beginPath(); ctx.arc(s.x, s.y, s.size, 0, Math.PI*2);
+    ctx.fillStyle = hsl(0,0,85,f); ctx.fill();
+  }
+}
+
+function drawGhostHeart(alpha) {
+  if (alpha < 0.005) return;
+  const s = getScale();
+  const breath = 1 + Math.sin(frame*0.01)*0.02;
+  ctx.save(); ctx.translate(CX, CY); ctx.beginPath();
+  for (let a = 0; a <= Math.PI*2; a += 0.01) {
+    if (a===0) ctx.moveTo(heartX(a)*9*s*breath, heartY(a)*9*s*breath);
+    else ctx.lineTo(heartX(a)*9*s*breath, heartY(a)*9*s*breath);
+  }
+  ctx.closePath(); ctx.strokeStyle = hsl(350,50,55,alpha);
+  ctx.lineWidth = 1; ctx.stroke(); ctx.restore();
+}
+
+function drawConnections(state, progress) {
+  if (state !== 'gather' || progress < 0.3) return;
+  const connAlpha = (progress - 0.3) / 0.7;
+  const maxDist = 45; ctx.lineWidth = 0.5;
+  for (let i = 0; i < particles.length; i += 3) {
+    for (let j = i+3; j < particles.length; j += 3) {
+      const d = dst(particles[i].x, particles[i].y, particles[j].x, particles[j].y);
+      if (d < maxDist) {
+        const a = (1 - d/maxDist) * connAlpha * 0.15;
+        ctx.beginPath(); ctx.moveTo(particles[i].x, particles[i].y);
+        ctx.lineTo(particles[j].x, particles[j].y);
+        ctx.strokeStyle = hsl(345, 60, 65, a); ctx.stroke();
+      }
+    }
+  }
+}
+
+function spawnPulse() {
+  pulseRings.push({ born: frame, scale: 0.65 });
+  setTimeout(() => pulseRings.push({ born: frame, scale: 0.65 }), 150);
+  setTimeout(() => pulseRings.push({ born: frame, scale: 0.65 }), 350);
+}
+
+function drawPulseRings() {
+  const s = getScale();
+  for (let i = pulseRings.length - 1; i >= 0; i--) {
+    const r = pulseRings[i];
+    const age = (frame - r.born) / 120;
+    if (age > 1) { pulseRings.splice(i, 1); continue; }
+    const scale = r.scale + age * 0.55;
+    const alpha = (1 - age) * 0.2;
+    ctx.save(); ctx.translate(CX, CY); ctx.beginPath();
+    for (let a = 0; a <= Math.PI*2; a += 0.01) {
+      const x = heartX(a)*9*s*scale; const y = heartY(a)*9*s*scale;
+      if (a===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+    }
+    ctx.closePath(); ctx.strokeStyle = hsl(345, 70, 65, alpha);
+    ctx.lineWidth = 1.5*(1 - age*0.5); ctx.stroke(); ctx.restore();
+  }
+}
+
+function animate() {
+  frame++;
+  ctx.fillStyle = 'rgba(0,0,0,0.11)';
+  ctx.fillRect(0, 0, W, H);
+  drawShimmer();
+
+  const { state, progress } = getPhase(frame);
+  const ep = ease(progress);
+
+  if (state === 'heart' && prevState === 'gather') spawnPulse();
+  prevState = state;
+
+  if (state === 'heart') drawGhostHeart(0.05);
+  else if (state === 'scatter') drawGhostHeart(0.05*(1-ep));
+  else if (state === 'gather') drawGhostHeart(0.05*ep);
+
+  for (const p of particles) {
+    const wobX = Math.sin(frame*0.013+p.phase)*p.wobble*3;
+    const wobY = Math.cos(frame*0.01+p.phase*1.3)*p.wobble*3;
+    let delayed, tx, ty, alpha;
+
+    if (state === 'heart') {
+      tx = p.homeX; ty = p.homeY; alpha = 0.85;
+    } else if (state === 'scatter') {
+      delayed = Math.max(0, Math.min(1, (progress - p.delay*0.3) / (1 - p.delay*0.3)));
+      const de = ease(delayed);
+      const spiralT = de * Math.PI * 1.2;
+      const baseX = lerp(p.homeX, p.scatterX, de);
+      const baseY = lerp(p.homeY, p.scatterY, de);
+      const spiralR = de * 15;
+      tx = baseX + Math.cos(p.angle + spiralT)*spiralR;
+      ty = baseY + Math.sin(p.angle + spiralT)*spiralR;
+      alpha = lerp(0.85, 0.35, de);
+    } else if (state === 'floating') {
+      tx = p.scatterX + Math.sin(frame*0.006+p.phase)*8;
+      ty = p.scatterY + Math.cos(frame*0.005+p.phase*1.2)*8;
+      alpha = 0.3 + Math.sin(frame*0.015+p.phase)*0.1;
+    } else {
+      delayed = Math.max(0, Math.min(1, (progress - (1-p.delay)*0.3) / (1 - (1-p.delay)*0.3)));
+      const de = ease(delayed);
+      tx = lerp(p.scatterX, p.homeX, de);
+      ty = lerp(p.scatterY, p.homeY, de);
+      alpha = lerp(0.35, 0.85, de);
+    }
+
+    p.x = tx + wobX; p.y = ty + wobY;
+    ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, Math.PI*2);
+    ctx.fillStyle = hsl(p.hue, p.sat, p.light, alpha); ctx.fill();
+  }
+
+  drawConnections(state, progress);
+  drawPulseRings();
+
+  if (state === 'heart') {
+    const glow = ctx.createRadialGradient(CX,CY,0,CX,CY,85);
+    glow.addColorStop(0, hsl(345,70,60,0.05+Math.sin(frame*0.012)*0.02));
+    glow.addColorStop(1, hsl(345,70,60,0));
+    ctx.fillStyle = glow; ctx.fillRect(CX-90,CY-90,180,180);
+  }
+
+  requestAnimationFrame(animate);
+}
+
+window.addEventListener('resize', resize);
+resize();
+ctx.fillStyle = '#000';
+ctx.fillRect(0, 0, W, H);
+animate();
+</script>
+</body>
+</html>
